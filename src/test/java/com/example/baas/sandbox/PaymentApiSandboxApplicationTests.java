@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -34,8 +35,7 @@ class PaymentApiSandboxApplicationTests {
 
     @Test
     void createsAndFetchesSuccessfulPayment() throws Exception {
-        MvcResult created = mockMvc.perform(post("/api/v1/payments")
-                        .header("Authorization", "Bearer sandbox-payment-token")
+        MvcResult created = mockMvc.perform(withBaasContext(post("/api/v1/payments"))
                         .header("Idempotency-Key", "idem-success-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(PAYMENT_JSON))
@@ -49,14 +49,12 @@ class PaymentApiSandboxApplicationTests {
 
         String paymentId = JsonTestSupport.read(created, "paymentId");
 
-        mockMvc.perform(get("/api/v1/payments/{paymentId}", paymentId)
-                        .header("Authorization", "Bearer sandbox-payment-token"))
+        mockMvc.perform(withBaasContext(get("/api/v1/payments/{paymentId}", paymentId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.paymentId").value(paymentId))
                 .andExpect(jsonPath("$.status").value("EXECUTED"));
 
-        mockMvc.perform(get("/api/v1/payments/{paymentId}/events", paymentId)
-                        .header("Authorization", "Bearer sandbox-payment-token"))
+        mockMvc.perform(withBaasContext(get("/api/v1/payments/{paymentId}/events", paymentId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[0].status").value("RECEIVED"))
@@ -65,15 +63,13 @@ class PaymentApiSandboxApplicationTests {
 
     @Test
     void rejectsInvalidPaymentRequestAndUnknownPaymentLookup() throws Exception {
-        mockMvc.perform(post("/api/v1/payments")
-                        .header("Authorization", "Bearer sandbox-payment-token")
+        mockMvc.perform(withBaasContext(post("/api/v1/payments"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
-        mockMvc.perform(get("/api/v1/payments/{paymentId}", "pay_missing")
-                        .header("Authorization", "Bearer sandbox-payment-token"))
+        mockMvc.perform(withBaasContext(get("/api/v1/payments/{paymentId}", "pay_missing")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PAYMENT_NOT_FOUND"));
     }
@@ -102,6 +98,17 @@ class PaymentApiSandboxApplicationTests {
     }
 
     @Test
+    void rejectsMissingBaasRequesterContext() throws Exception {
+        mockMvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer sandbox-payment-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(PAYMENT_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAAS_CONTEXT_REQUIRED"))
+                .andExpect(jsonPath("$.details.missingHeaders", hasSize(3)));
+    }
+
+    @Test
     void simulatesSandboxFailures() throws Exception {
         assertScenario("insufficient_funds", 422, "INSUFFICIENT_FUNDS");
         assertScenario("invalid_beneficiary", 422, "INVALID_BENEFICIARY");
@@ -111,16 +118,14 @@ class PaymentApiSandboxApplicationTests {
 
     @Test
     void handlesIdempotencyReplayAndConflict() throws Exception {
-        mockMvc.perform(post("/api/v1/payments")
-                        .header("Authorization", "Bearer sandbox-payment-token")
+        mockMvc.perform(withBaasContext(post("/api/v1/payments"))
                         .header("Idempotency-Key", "idem-replay-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(PAYMENT_JSON))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("EXECUTED"));
 
-        mockMvc.perform(post("/api/v1/payments")
-                        .header("Authorization", "Bearer sandbox-payment-token")
+        mockMvc.perform(withBaasContext(post("/api/v1/payments"))
                         .header("Idempotency-Key", "idem-replay-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(PAYMENT_JSON))
@@ -129,8 +134,7 @@ class PaymentApiSandboxApplicationTests {
 
         String differentPayment = PAYMENT_JSON.replace("125.50", "126.50");
 
-        mockMvc.perform(post("/api/v1/payments")
-                        .header("Authorization", "Bearer sandbox-payment-token")
+        mockMvc.perform(withBaasContext(post("/api/v1/payments"))
                         .header("Idempotency-Key", "idem-replay-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(differentPayment))
@@ -150,12 +154,20 @@ class PaymentApiSandboxApplicationTests {
     }
 
     private void assertScenario(String scenario, int status, String code) throws Exception {
-        mockMvc.perform(post("/api/v1/payments")
-                        .header("Authorization", "Bearer sandbox-payment-token")
+        mockMvc.perform(withBaasContext(post("/api/v1/payments"))
                         .header("X-Sandbox-Scenario", scenario)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(PAYMENT_JSON))
                 .andExpect(status().is(status))
                 .andExpect(jsonPath("$.code").value(code));
+    }
+
+    private static MockHttpServletRequestBuilder withBaasContext(MockHttpServletRequestBuilder request) {
+        return request
+                .header("Authorization", "Bearer sandbox-payment-token")
+                .header("X-Partner-Id", "fintech-partner-001")
+                .header("X-On-Behalf-Of-Customer-Id", "bank-customer-456")
+                .header("X-Customer-Consent-Id", "consent-payment-uat-001")
+                .header("X-Request-Id", "req-test-001");
     }
 }

@@ -35,7 +35,12 @@ public class MockOAuthFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return path.equals("/actuator/health")
+        return path.equals("/")
+                || path.equals("/index.html")
+                || path.equals("/portal.css")
+                || path.equals("/portal.js")
+                || path.equals("/api/v1/sandbox/scenarios")
+                || path.equals("/actuator/health")
                 || path.startsWith("/v3/api-docs")
                 || path.startsWith("/swagger-ui")
                 || path.equals("/swagger-ui.html");
