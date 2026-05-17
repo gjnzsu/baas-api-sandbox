@@ -149,14 +149,119 @@ function resetProgress() {
 
 async function runSelectedScenario() {
   const scenario = selectedScenario();
+  const captures = {};
+  const results = [];
+
+  for (const step of scenario.steps) {
+    const preparedStep = interpolateStep(step, captures);
+    const response = await fetch(preparedStep.path, {
+      method: preparedStep.method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(preparedStep.headers || {})
+      },
+      body: preparedStep.method === "GET" ? undefined : JSON.stringify(preparedStep.body || {})
+    });
+
+    const body = await readResponseBody(response);
+    applyCaptures(step.capture || {}, body, captures);
+
+    results.push({
+      stepId: step.id,
+      request: preparedStep,
+      httpStatus: response.status,
+      responseBody: body,
+      expected: step.expected,
+      match: matchesExpected(response.status, body, step.expected)
+    });
+  }
+
+  const complete = results.every((result) => result.match);
+  const paymentId = captures.paymentId || findPaymentId(results);
+
   state.evidence[scenario.id] = {
     scenarioId: scenario.id,
     timestamp: new Date().toISOString(),
-    complete: false,
+    complete,
+    expectedMatch: complete,
+    paymentId,
+    stepResults: results,
     localOnly: true,
-    note: "Scenario execution will be enabled in the next implementation task"
   };
   saveEvidence();
+}
+
+function interpolateStep(step, captures) {
+  return {
+    ...step,
+    path: interpolateValue(step.path, captures),
+    headers: interpolateObject(step.headers || {}, captures),
+    body: interpolateObject(step.body || {}, captures)
+  };
+}
+
+function interpolateObject(value, captures) {
+  return JSON.parse(JSON.stringify(value), (key, item) => {
+    if (typeof item === "string") {
+      return interpolateValue(item, captures);
+    }
+    return item;
+  });
+}
+
+function interpolateValue(value, captures) {
+  return Object.entries(captures).reduce(
+    (result, [name, capturedValue]) => result.replaceAll(`{${name}}`, capturedValue),
+    value
+  );
+}
+
+async function readResponseBody(response) {
+  const text = await response.text();
+  if (!text) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
+function applyCaptures(captureRules, body, captures) {
+  for (const [name, path] of Object.entries(captureRules)) {
+    if (path === "$.paymentId" && body.paymentId) {
+      captures[name] = body.paymentId;
+    }
+  }
+}
+
+function matchesExpected(httpStatus, body, expected) {
+  if (httpStatus !== expected.httpStatus) {
+    return false;
+  }
+  if (expected.paymentStatus && body.status !== expected.paymentStatus) {
+    return false;
+  }
+  if (expected.errorCode && body.code !== expected.errorCode) {
+    return false;
+  }
+  if (expected.eventStatuses && expected.eventStatuses.length > 0) {
+    const statuses = Array.isArray(body)
+      ? body.map((event) => event.status)
+      : (body.events || []).map((event) => event.status);
+    return expected.eventStatuses.every((status, index) => statuses[index] === status);
+  }
+  return true;
+}
+
+function findPaymentId(results) {
+  for (const result of results) {
+    if (result.responseBody?.paymentId) {
+      return result.responseBody.paymentId;
+    }
+  }
+  return null;
 }
 
 function escapeHtml(value) {
