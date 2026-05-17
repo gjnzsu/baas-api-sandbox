@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BaaS Payment Sandbox</title>
+  <link rel="stylesheet" href="/portal.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>BaaS Payment Sandbox</h1>
+      <p>UAT runbook workspace for partner payment API onboarding</p>
+    </div>
+    <div class="topbar-actions">
+      <span id="base-url">Base URL loading</span>
+      <a href="/swagger-ui.html">OpenAPI</a>
+      <button id="reset-progress" type="button">Reset</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside id="scenario-runbook" class="panel scenario-runbook" aria-label="Scenario runbook">
+      <div class="panel-heading">
+        <h2>Scenario Runbook</h2>
+        <span id="progress-summary">0/0 complete</span>
+      </div>
+      <div id="scenario-list"></div>
+    </aside>
+
+    <section id="scenario-detail" class="panel scenario-detail" aria-label="Scenario detail">
+      <div class="panel-heading">
+        <h2 id="scenario-title">Select a scenario</h2>
+        <span id="scenario-category"></span>
+      </div>
+      <p id="scenario-purpose">Choose a scenario from the runbook.</p>
+      <div id="scenario-steps"></div>
+      <div class="actions">
+        <button id="run-scenario" type="button">Run scenario</button>
+        <button id="copy-request" type="button">Copy request</button>
+      </div>
+      <pre id="copy-output"></pre>
+    </section>
+
+    <aside id="evidence-panel" class="panel evidence-panel" aria-label="Evidence panel">
+      <div class="panel-heading">
+        <h2>Evidence</h2>
+        <span id="completion-status">Not complete</span>
+      </div>
+      <div id="evidence-content">No run captured yet. Evidence is local to this browser session.</div>
+      <button id="manual-complete" type="button">Mark external run complete</button>
+    </aside>
+  </main>
+
+  <script src="/portal.js"></script>
+</body>
+</html>
