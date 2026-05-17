@@ -6,6 +6,7 @@ import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -32,6 +33,13 @@ public class RestExceptionHandler {
     ResponseEntity<ErrorEnvelope> handleBadRequest(Exception exception) {
         return ResponseEntity.badRequest()
                 .body(ErrorEnvelope.of("VALIDATION_ERROR", "Request validation failed", Map.of()));
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    ResponseEntity<ErrorEnvelope> handleUnsupportedMediaType(HttpMediaTypeNotSupportedException exception) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(ErrorEnvelope.of("UNSUPPORTED_MEDIA_TYPE",
+                        "Content-Type application/json is required", Map.of()));
     }
 
     @ExceptionHandler(Exception.class)

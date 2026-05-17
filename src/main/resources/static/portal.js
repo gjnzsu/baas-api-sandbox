@@ -104,13 +104,23 @@ function copySelectedScenario() {
 
 function buildCurl(step) {
   const url = `${state.catalog.baseUrl}${step.path}`;
-  const headers = Object.entries(step.headers || {})
+  const headers = Object.entries(curlHeaders(step))
     .map(([name, value]) => `  -H "${name}: ${value}"`)
     .join(" \\\n");
   const body = step.body && Object.keys(step.body).length > 0
     ? ` \\\n  -d '${JSON.stringify(step.body)}'`
     : "";
   return `curl -X ${step.method} "${url}" \\\n${headers}${body}`;
+}
+
+function curlHeaders(step) {
+  if (step.method === "GET") {
+    return step.headers || {};
+  }
+  return {
+    "Content-Type": "application/json",
+    ...(step.headers || {})
+  };
 }
 
 function renderEvidence() {

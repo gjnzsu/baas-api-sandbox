@@ -109,6 +109,15 @@ class PaymentApiSandboxApplicationTests {
     }
 
     @Test
+    void rejectsUnsupportedPaymentContentTypeWithoutInternalError() throws Exception {
+        mockMvc.perform(withBaasContext(post("/api/v1/payments"))
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content(PAYMENT_JSON))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));
+    }
+
+    @Test
     void simulatesSandboxFailures() throws Exception {
         assertScenario("insufficient_funds", 422, "INSUFFICIENT_FUNDS");
         assertScenario("invalid_beneficiary", 422, "INVALID_BENEFICIARY");
