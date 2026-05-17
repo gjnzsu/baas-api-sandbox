@@ -46,7 +46,10 @@ function renderScenarioList() {
         const dot = document.createElement("span");
         dot.className = `status-dot ${state.evidence[scenario.id]?.complete ? "complete" : ""}`;
         const label = document.createElement("span");
-        label.textContent = scenario.title;
+        label.innerHTML = `
+          <strong>${escapeHtml(shortTitle(scenario.title))}</strong>
+          <small>${escapeHtml(summaryForScenario(scenario))}</small>
+        `;
         button.append(dot, label);
         host.appendChild(button);
       });
@@ -81,13 +84,10 @@ function renderSelectedScenario() {
     section.className = "step";
     section.innerHTML = `
       <h3>${index + 1}. ${escapeHtml(step.title)}</h3>
-      <p><strong>${escapeHtml(step.method)}</strong> ${escapeHtml(step.path)}</p>
-      <h4>Headers</h4>
-      <pre>${escapeHtml(JSON.stringify(step.headers, null, 2))}</pre>
-      <h4>Body</h4>
-      <pre>${escapeHtml(JSON.stringify(step.body || {}, null, 2))}</pre>
-      <h4>Expected</h4>
-      <pre>${escapeHtml(JSON.stringify(step.expected, null, 2))}</pre>
+      <h4>Request setup</h4>
+      <pre class="request-preview">${escapeHtml(requestPreview(step))}</pre>
+      <h4>Expected outcome</h4>
+      <div class="expected-card">${expectedPreview(step.expected)}</div>
     `;
     steps.appendChild(section);
   });
@@ -127,9 +127,7 @@ function renderEvidence() {
   const scenario = selectedScenario();
   const evidence = state.evidence[scenario.id];
   document.getElementById("completion-status").textContent = evidence?.complete ? "Complete" : "Not complete";
-  document.getElementById("evidence-content").innerHTML = evidence
-    ? `<pre>${escapeHtml(JSON.stringify(evidence, null, 2))}</pre>`
-    : "No run captured yet. Evidence is local to this browser session.";
+  document.getElementById("evidence-content").innerHTML = evidence ? evidencePreview(evidence) : emptyEvidence();
 }
 
 function saveEvidence() {
@@ -272,6 +270,102 @@ function findPaymentId(results) {
     }
   }
   return null;
+}
+
+function shortTitle(title) {
+  return title.replace(" initialization", "");
+}
+
+function summaryForScenario(scenario) {
+  const first = scenario.steps[0];
+  const expected = first.expected;
+  if (expected.errorCode) {
+    return `${expected.httpStatus} ${expected.errorCode}`;
+  }
+  if (expected.paymentStatus) {
+    return `${expected.httpStatus} ${expected.paymentStatus}`;
+  }
+  return `${first.method} ${first.path}`;
+}
+
+function requestPreview(step) {
+  const lines = [`${step.method} ${step.path}`];
+  for (const [name, value] of Object.entries(step.headers || {})) {
+    lines.push(`${name}: ${value}`);
+  }
+  if (step.body && Object.keys(step.body).length > 0) {
+    lines.push("");
+    lines.push(JSON.stringify(step.body));
+  }
+  return lines.join("\n");
+}
+
+function expectedPreview(expected) {
+  const lines = [`HTTP ${expected.httpStatus}`];
+  if (expected.paymentStatus) {
+    lines.push(`Payment status: ${expected.paymentStatus}`);
+  }
+  if (expected.errorCode) {
+    lines.push(`Error code: ${expected.errorCode}`);
+  }
+  if (expected.eventStatuses && expected.eventStatuses.length > 0) {
+    lines.push(`Lifecycle events: ${expected.eventStatuses.join(" -> ")}`);
+  }
+  return `<p>${lines.map(escapeHtml).join("<br>")}</p>`;
+}
+
+function emptyEvidence() {
+  return `
+    <p>No run captured yet.</p>
+    <p class="muted">Evidence is local to this browser session.</p>
+  `;
+}
+
+function evidencePreview(evidence) {
+  const latest = evidence.stepResults?.at(-1);
+  const statusClass = evidence.expectedMatch ? "match-pass" : "match-fail";
+  return `
+    <dl class="evidence-summary">
+      <div><dt>Timestamp</dt><dd>${escapeHtml(evidence.timestamp)}</dd></div>
+      <div><dt>Scenario</dt><dd>${escapeHtml(evidence.scenarioId)}</dd></div>
+      <div><dt>HTTP status</dt><dd>${escapeHtml(latest?.httpStatus ?? "External")}</dd></div>
+      <div><dt>Payment ID</dt><dd>${escapeHtml(evidence.paymentId || "-")}</dd></div>
+      <div><dt>Expected match</dt><dd class="${statusClass}">${escapeHtml(String(Boolean(evidence.expectedMatch)))}</dd></div>
+    </dl>
+    ${latest ? `<h4>Response body</h4><pre class="response-preview">${escapeHtml(JSON.stringify(latest.responseBody, null, 2))}</pre>` : ""}
+    ${lifecyclePreview(latest)}
+    <h4>Actual result summary</h4>
+    <div class="${evidence.expectedMatch ? "result-card success" : "result-card failure"}">
+      ${escapeHtml(resultSummary(evidence, latest))}
+    </div>
+  `;
+}
+
+function lifecyclePreview(latest) {
+  const body = latest?.responseBody;
+  const events = Array.isArray(body) ? body : body?.events;
+  if (!events || events.length === 0) {
+    return "";
+  }
+  return `
+    <h4>Lifecycle events</h4>
+    <ol class="event-list">
+      ${events.map((event) => `<li>${escapeHtml(event.status)}</li>`).join("")}
+    </ol>
+  `;
+}
+
+function resultSummary(evidence, latest) {
+  if (evidence.external) {
+    return "Marked complete manually after external Postman/curl execution.";
+  }
+  if (!latest) {
+    return "No portal-run result captured.";
+  }
+  if (evidence.expectedMatch) {
+    return `Matched expected outcome: HTTP ${latest.httpStatus}${evidence.paymentId ? `, paymentId ${evidence.paymentId}` : ""}`;
+  }
+  return `Did not match expected outcome: HTTP ${latest.httpStatus}`;
 }
 
 function escapeHtml(value) {

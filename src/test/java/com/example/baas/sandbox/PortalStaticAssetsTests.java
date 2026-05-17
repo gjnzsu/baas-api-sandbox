@@ -41,6 +41,8 @@ class PortalStaticAssetsTests {
         mockMvc.perform(get("/portal.js"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("loadScenarioCatalog")))
-                .andExpect(content().string(containsString("\"Content-Type\": \"application/json\"")));
+                .andExpect(content().string(containsString("\"Content-Type\": \"application/json\"")))
+                .andExpect(content().string(containsString("Request setup")))
+                .andExpect(content().string(containsString("Actual result summary")));
     }
 }
