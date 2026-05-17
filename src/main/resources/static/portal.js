@@ -97,20 +97,22 @@ function renderSelectedScenario() {
 
 function copySelectedScenario() {
   const scenario = selectedScenario();
-  const text = scenario.steps.map((step) => buildCurl(step)).join("\n\n");
+  const runId = createRunId(scenario);
+  const text = scenario.steps.map((step) => buildCurl(step, runId)).join("\n\n");
   document.getElementById("copy-output").textContent = text;
   navigator.clipboard?.writeText(text);
 }
 
-function buildCurl(step) {
+function buildCurl(step, runId) {
+  const runScopedStep = scopeIdempotencyKey(step, runId);
   const url = `${state.catalog.baseUrl}${step.path}`;
-  const headers = Object.entries(curlHeaders(step))
+  const headers = Object.entries(curlHeaders(runScopedStep))
     .map(([name, value]) => `  -H "${name}: ${value}"`)
     .join(" \\\n");
-  const body = step.body && Object.keys(step.body).length > 0
-    ? ` \\\n  -d '${JSON.stringify(step.body)}'`
+  const body = runScopedStep.body && Object.keys(runScopedStep.body).length > 0
+    ? ` \\\n  -d '${JSON.stringify(runScopedStep.body)}'`
     : "";
-  return `curl -X ${step.method} "${url}" \\\n${headers}${body}`;
+  return `curl -X ${runScopedStep.method} "${url}" \\\n${headers}${body}`;
 }
 
 function curlHeaders(step) {
@@ -157,11 +159,12 @@ function resetProgress() {
 
 async function runSelectedScenario() {
   const scenario = selectedScenario();
+  const runId = createRunId(scenario);
   const captures = {};
   const results = [];
 
   for (const step of scenario.steps) {
-    const preparedStep = interpolateStep(step, captures);
+    const preparedStep = interpolateStep(scopeIdempotencyKey(step, runId), captures);
     const response = await fetch(preparedStep.path, {
       method: preparedStep.method,
       headers: {
@@ -272,6 +275,21 @@ function findPaymentId(results) {
   return null;
 }
 
+function createRunId(scenario) {
+  return `${scenario.id}-${Date.now()}`;
+}
+
+function scopeIdempotencyKey(step, runId) {
+  const headers = { ...(step.headers || {}) };
+  if (headers["Idempotency-Key"]) {
+    headers["Idempotency-Key"] = `${headers["Idempotency-Key"]}-${runId}`;
+  }
+  return {
+    ...step,
+    headers
+  };
+}
+
 function shortTitle(title) {
   return title.replace(" initialization", "");
 }
@@ -324,12 +342,14 @@ function emptyEvidence() {
 function evidencePreview(evidence) {
   const latest = evidence.stepResults?.at(-1);
   const statusClass = evidence.expectedMatch ? "match-pass" : "match-fail";
+  const paymentStatus = paymentStatusFrom(latest);
   return `
     <dl class="evidence-summary">
       <div><dt>Timestamp</dt><dd>${escapeHtml(evidence.timestamp)}</dd></div>
       <div><dt>Scenario</dt><dd>${escapeHtml(evidence.scenarioId)}</dd></div>
       <div><dt>HTTP status</dt><dd>${escapeHtml(latest?.httpStatus ?? "External")}</dd></div>
       <div><dt>Payment ID</dt><dd>${escapeHtml(evidence.paymentId || "-")}</dd></div>
+      <div><dt>Payment status</dt><dd>${escapeHtml(paymentStatus || "-")}</dd></div>
       <div><dt>Expected match</dt><dd class="${statusClass}">${escapeHtml(String(Boolean(evidence.expectedMatch)))}</dd></div>
     </dl>
     ${latest ? `<h4>Response body</h4><pre class="response-preview">${escapeHtml(JSON.stringify(latest.responseBody, null, 2))}</pre>` : ""}
@@ -342,6 +362,11 @@ function evidencePreview(evidence) {
 }
 
 function lifecyclePreview(latest) {
+  const expectedStatuses = latest?.expected?.eventStatuses || [];
+  if (expectedStatuses.length === 0) {
+    return "";
+  }
+
   const body = latest?.responseBody;
   const events = Array.isArray(body) ? body : body?.events;
   if (!events || events.length === 0) {
@@ -353,6 +378,10 @@ function lifecyclePreview(latest) {
       ${events.map((event) => `<li>${escapeHtml(event.status)}</li>`).join("")}
     </ol>
   `;
+}
+
+function paymentStatusFrom(latest) {
+  return latest?.responseBody?.status || null;
 }
 
 function resultSummary(evidence, latest) {

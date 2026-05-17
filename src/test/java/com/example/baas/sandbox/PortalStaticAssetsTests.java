@@ -43,6 +43,9 @@ class PortalStaticAssetsTests {
                 .andExpect(content().string(containsString("loadScenarioCatalog")))
                 .andExpect(content().string(containsString("\"Content-Type\": \"application/json\"")))
                 .andExpect(content().string(containsString("Request setup")))
-                .andExpect(content().string(containsString("Actual result summary")));
+                .andExpect(content().string(containsString("Actual result summary")))
+                .andExpect(content().string(containsString("scopeIdempotencyKey")))
+                .andExpect(content().string(containsString("paymentStatusFrom")))
+                .andExpect(content().string(containsString("latest?.expected?.eventStatuses")));
     }
 }

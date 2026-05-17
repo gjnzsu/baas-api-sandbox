@@ -1,16 +1,33 @@
 package com.example.baas.sandbox;
 
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.baas.sandbox.scenario.SandboxScenario;
+import com.example.baas.sandbox.scenario.SandboxScenarioService;
+import com.example.baas.sandbox.scenario.ScenarioStep;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -18,6 +35,12 @@ class SandboxScenarioMetadataTests {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private SandboxScenarioService scenarioService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void exposesScenarioCatalogWithoutAuthorization() throws Exception {
@@ -65,5 +88,81 @@ class SandboxScenarioMetadataTests {
                 .andExpect(jsonPath("$.scenarios[1].steps", hasSize(2)))
                 .andExpect(jsonPath("$.scenarios[1].steps[0].capture.paymentId").value("$.paymentId"))
                 .andExpect(jsonPath("$.scenarios[1].steps[1].path").value("/api/v1/payments/{paymentId}"));
+    }
+
+    @Test
+    void allScenarioDefinitionsExecuteAgainstSandboxApi() throws Exception {
+        List<SandboxScenario> scenarios = scenarioService.catalog().scenarios();
+
+        assertThat(scenarios, hasSize(15));
+
+        for (SandboxScenario scenario : scenarios) {
+            Map<String, String> captures = new LinkedHashMap<>();
+            String runId = scenario.id() + "-" + UUID.randomUUID();
+
+            for (ScenarioStep step : scenario.steps()) {
+                ScenarioStep prepared = prepareStep(step, captures, runId);
+                MvcResult result = mockMvc.perform(toRequest(prepared)).andReturn();
+                JsonNode response = parseResponse(result);
+
+                String label = scenario.id() + "/" + step.id();
+                assertThat(label + " HTTP status",
+                        result.getResponse().getStatus(), is(prepared.expected().httpStatus()));
+
+                if (prepared.expected().paymentStatus() != null) {
+                    assertThat(label + " payment status",
+                            response.path("status").asText(), is(prepared.expected().paymentStatus()));
+                }
+                if (prepared.expected().errorCode() != null) {
+                    assertThat(label + " error code",
+                            response.path("code").asText(), is(prepared.expected().errorCode()));
+                }
+                if (!prepared.expected().eventStatuses().isEmpty()) {
+                    assertThat(label + " event statuses",
+                            eventStatuses(response), is(prepared.expected().eventStatuses()));
+                }
+                if ("$.paymentId".equals(prepared.capture().get("paymentId"))) {
+                    captures.put("paymentId", response.path("paymentId").asText());
+                }
+            }
+        }
+    }
+
+    private ScenarioStep prepareStep(ScenarioStep step, Map<String, String> captures, String runId) {
+        Map<String, String> headers = new LinkedHashMap<>(step.headers());
+        if (headers.containsKey("Idempotency-Key")) {
+            headers.put("Idempotency-Key", headers.get("Idempotency-Key") + "-" + runId);
+        }
+
+        String path = step.path();
+        for (Map.Entry<String, String> capture : captures.entrySet()) {
+            path = path.replace("{" + capture.getKey() + "}", capture.getValue());
+        }
+
+        return new ScenarioStep(step.id(), step.title(), step.method(), path, headers, step.body(),
+                step.expected(), step.capture());
+    }
+
+    private MockHttpServletRequestBuilder toRequest(ScenarioStep step) throws Exception {
+        MockHttpServletRequestBuilder builder = request(HttpMethod.valueOf(step.method()), step.path());
+        step.headers().forEach(builder::header);
+
+        if (!"GET".equals(step.method())) {
+            builder.contentType(MediaType.APPLICATION_JSON);
+            builder.content(objectMapper.writeValueAsString(step.body()));
+        }
+
+        return builder;
+    }
+
+    private JsonNode parseResponse(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    private List<String> eventStatuses(JsonNode response) {
+        JsonNode events = response.isArray() ? response : response.path("events");
+        List<String> statuses = new ArrayList<>();
+        events.forEach(event -> statuses.add(event.path("status").asText()));
+        return statuses;
     }
 }
